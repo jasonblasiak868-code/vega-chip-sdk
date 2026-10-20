@@ -40,6 +40,15 @@ class NonVolatile(unittest.TestCase):
         self.assertEqual(NV.NVStore(d / "a", d / "b").records, s.records)
         self.assertEqual((d / "a").read_bytes(), (d / "b").read_bytes())
 
+    def test_a_region_that_silently_drops_or_alters_a_write_is_caught_by_the_read_back(self):
+        for stuck in (lambda line: b"", lambda line: line.replace(b"1", b"7", 1)):
+            d = pathlib.Path(tempfile.mkdtemp())
+            s = NV.NVStore(d / "a", d / "b")
+            s.b.stuck = stuck
+            with self.assertRaises(NV.NVFault):
+                s.append({"x": 1})
+            self.assertEqual(s.records, [])                                               # nothing was relied on
+
     def test_a_power_cut_mid_write_is_discarded_and_leaves_the_unit_failed_until_restart(self):
         d = pathlib.Path(tempfile.mkdtemp())
         s = NV.NVStore(d / "a", d / "b")
@@ -252,6 +261,16 @@ class Unit(unittest.TestCase):
 
 
 class HardStopAndSideDoor(unittest.TestCase):
+    def test_a_stopped_unit_refuses_to_transact_even_if_a_live_grant_somehow_survives(self):
+        r = Rig()
+        grant = r.go()
+        r.geu.hard_stop()
+        r.geu._open[grant.port] = grant                                                   # simulate a race that left the grant open
+        with self.assertRaises(G.Denied) as cm:
+            r.geu.transact(grant, b"x")
+        self.assertEqual(cm.exception.reason, "hard_stop")
+        self.assertEqual(r.geu.port_log("net"), [])
+
     def test_a_hard_stop_by_anyone_and_a_restore_only_by_the_human(self):
         r = Rig()
         r.geu.hard_stop()
