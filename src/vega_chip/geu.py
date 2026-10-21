@@ -11,8 +11,10 @@ Clock roll-back: the unit records the clock reading with every decision and refu
 WHAT THIS IS: an executable specification. It proves the decision rules and the recovery rules; it is not a circuit. The same signed bytes must give the same accept/deny as the software jacket: conformance.py checks that.
 LIMITS (the design's own): the human signing device must be out of reach of what is governed; a physical attacker with a probe is out of scope; Python's 'private' parts are a convention, so the model shows the
 architecture (compute only reaches a port through the unit) rather than enforcing it against code running in the same process."""
+import functools
 import hashlib
 import json
+import threading
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -64,9 +66,20 @@ class Grant:
         self.port, self.action_hash, self.expiry, self.used = port, action_hash, expiry, False
 
 
+def _serial(fn):
+    """The unit is one sequential device: its operations never overlap. Without this, two threads could pass the same replay check, use one grant twice, or tear the
+    non-volatile record (which fails the unit until restart)."""
+    @functools.wraps(fn)
+    def inner(self, *a, **k):
+        with self._lock:
+            return fn(self, *a, **k)
+    return inner
+
+
 class GEU:
     def __init__(self, store: NV.NVStore, clock: MonotonicClock, ports=("net", "disk", "display"), device="dev", surface="surf", trip_on_side_door: bool = True):
         self.nv, self.clock, self.device, self.surface, self.trip = store, clock, device, surface, trip_on_side_door
+        self._lock = threading.RLock()
         self._ports = {p: _Port(p) for p in ports}
         self._open = {}
         self.faulted = False
@@ -113,6 +126,7 @@ class GEU:
         raise Denied(reason)
 
     # ---- the key store (write once) ---------------------------------------------------------------------------------------------------
+    @_serial
     def program_keys(self, pubs):
         if self.keys:
             raise Denied("keys_blown")
@@ -176,6 +190,7 @@ class GEU:
             return False
 
     # ---- steps 1, 6, 7: the gate ------------------------------------------------------------------------------------------------------------------------
+    @_serial
     def request(self, action, params, signed, port) -> Grant:
         if self.faulted:
             raise Denied("faulted")
@@ -190,6 +205,7 @@ class GEU:
         self._open[port] = g
         return g
 
+    @_serial
     def transact(self, grant, payload) -> int:
         if self.faulted or self.hard_stopped:
             raise Denied("faulted" if self.faulted else "hard_stop")
@@ -206,12 +222,14 @@ class GEU:
         return len(payload)
 
     # ---- hard stop ----------------------------------------------------------------------------------------------------------------------------------------------
+    @_serial
     def hard_stop(self):
         """Anyone (or anything) can engage it. Nothing opens while it is engaged."""
         self.hard_stopped = True
         self._open.clear()
         self._append({"op": "hard_stop"})
 
+    @_serial
     def restore(self, signed):
         """Lifting the stop is HUMAN_ONLY: it needs its own signed commitment for 'restore_after_hard_stop'."""
         if self.faulted:
@@ -228,6 +246,7 @@ class GEU:
             raise Denied("faulted")
 
     # ---- the side door ------------------------------------------------------------------------------------------------------------------------------------------------------
+    @_serial
     def program_dma(self, table: dict, signed):
         """Which initiators may reach which ports. Changing it is a gate-config change: HUMAN_ONLY, one commitment over the exact table."""
         if not isinstance(table, dict) or not all(isinstance(k, str) and isinstance(v, list) and set(v) <= set(self._ports) for k, v in table.items()):
@@ -238,11 +257,13 @@ class GEU:
             raise Denied("faulted")
         self.dma = {k: set(v) for k, v in canon.items()}
 
+    @_serial
     def egress(self, initiator: str, port: str, payload, grant):
         if port not in self._ports or port not in self.dma.get(initiator, set()):
             self._deny("dma_not_allowed", "egress", "", port)
         return self.transact(grant, payload)
 
+    @_serial
     def raw_port_write(self, port: str, payload):
         """What a bypass looks like: compute reaching a port without the unit. Always refused, always recorded; with trip_on_side_door the unit also hard-stops."""
         self._append({"op": "decision", "result": "DENIED", "reason": "side_door", "action": "raw_write", "action_hash": "", "port": str(port)[:20]})

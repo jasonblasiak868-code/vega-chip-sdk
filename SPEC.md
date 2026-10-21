@@ -216,6 +216,6 @@ python -m pytest tests/ -v
 python -m unittest tests.redteam_1_chip -v
 ```
 
-**Passing means:** all 30 tests pass; the GEU and software jacket decide identically on all conformance vectors; mutation suite kills 46/48 mutations (2 known survivors documented).
+**Passing means:** all 34 tests pass; the GEU and software jacket decide identically on all conformance vectors; mutation suite kills 46/48 mutations (2 known survivors documented).
 
 **Passing does NOT mean:** production readiness; expert-reviewed cryptography; physical security; timing/power/area correctness; hardware implementation exists (FPGA/silicon is DESIGNED ONLY); continuous clock rollback protection; defense against same-process bypass.

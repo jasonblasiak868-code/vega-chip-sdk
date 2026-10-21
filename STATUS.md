@@ -7,7 +7,7 @@
 - pre_unit
 - conformance
 
-Tests: 30 tests in 1 files, all passing.
+Tests: 34 tests in 2 files, all passing.
 
 ## DESIGNED ONLY (not built)
 

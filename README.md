@@ -26,7 +26,7 @@ A software reference model of the governance hardware (silicon and photonic embo
 | Version | 0.1.0 |
 | Python | >=3.10 |
 | Dependencies | cryptography>=42, vega-custody-sdk, vega-governance-jacket-sdk |
-| Tests | 30 tests in 1 file, all passing |
+| Tests | 34 tests in 2 files, all passing |
 | Status | BUILT: nv, geu, pre_unit, conformance. DESIGNED ONLY: FPGA/silicon prototype, photonic accelerators (untrusted compute inside the gate). See STATUS.md. |
 
 ## End-to-end functions
@@ -192,7 +192,7 @@ The GEU's `trip_on_side_door` parameter (default `True`) is a configuration choi
 
 ## Tests
 
-30 tests in 1 file (`tests/redteam_1_chip.py`), all passing. Run with:
+34 tests in 2 files (`tests/redteam_1_chip.py`), all passing. Run with:
 
 ```bash
 python -m pytest tests/ -v
