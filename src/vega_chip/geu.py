@@ -161,7 +161,7 @@ class GEU:
         if nh in self.burned:
             self._deny("replay", action, ah, port)
         exp = signed.get("expiry")
-        if isinstance(exp, bool) or not isinstance(exp, (int, str)) or (isinstance(exp, str) and not exp.isdigit()):
+        if isinstance(exp, bool) or not isinstance(exp, (int, str)) or (isinstance(exp, str) and not (exp.isascii() and exp.isdigit())):
             self._deny("bad_fields", action, ah, port)
         exp = int(exp)
         now = self.clock.read()

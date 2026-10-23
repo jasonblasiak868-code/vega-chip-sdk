@@ -59,12 +59,15 @@ class PREUnit:
     def __init__(self, geu: GEU):
         self.geu = geu
         self.locked = {}
+        self.gen = {}                                   # per workflow: bumped by every lock and revoke, so a run opened before a revoke can tell
         for rec in geu.nv.records:
             d = rec["data"]
             if d.get("op") == "pre_lock":
                 self.locked[d["workflow"]] = d["steps"]
+                self.gen[d["workflow"]] = self.gen.get(d["workflow"], 0) + 1
             elif d.get("op") == "pre_revoke":
                 self.locked.pop(d["workflow"], None)
+                self.gen[d["workflow"]] = self.gen.get(d["workflow"], 0) + 1
 
     @staticmethod
     def _check_steps(steps):
@@ -93,6 +96,7 @@ class PREUnit:
         if not self.geu._append({"op": "pre_lock", "workflow": workflow, "steps": steps}):
             raise Denied("faulted")
         self.locked[workflow] = steps
+        self.gen[workflow] = self.gen.get(workflow, 0) + 1
 
     def revoke(self, workflow: str, signed):
         if workflow not in self.locked:
@@ -101,6 +105,7 @@ class PREUnit:
         if not self.geu._append({"op": "pre_revoke", "workflow": workflow}):
             raise Denied("faulted")
         del self.locked[workflow]
+        self.gen[workflow] = self.gen.get(workflow, 0) + 1
 
     def _refuse(self, run, step, reason):
         self.geu._append({"op": "pre_refused", "workflow": run.workflow, "step": str(step)[:60], "reason": reason})
@@ -108,12 +113,12 @@ class PREUnit:
     def begin(self, workflow: str) -> "Run":
         if self.geu.faulted or self.geu.hard_stopped:
             raise Trap("faulted" if self.geu.faulted else "hard_stop")
-        return Run(self, workflow, self.locked.get(workflow))
+        return Run(self, workflow, self.locked.get(workflow), self.gen.get(workflow, 0))
 
 
 class Run:
-    def __init__(self, unit: PREUnit, workflow: str, steps):
-        self.unit, self.workflow, self.steps, self.pos, self.done = unit, workflow, steps, 0, []
+    def __init__(self, unit: PREUnit, workflow: str, steps, gen: int = 0):
+        self.unit, self.workflow, self.steps, self.pos, self.done, self.gen = unit, workflow, steps, 0, [], gen
 
     @property
     def quarantined(self) -> bool:
@@ -127,6 +132,9 @@ class Run:
             raise Trap("bad_step")
         expect, budget = None, {}
         if not self.quarantined:
+            if u.gen.get(self.workflow, 0) != self.gen or self.workflow not in u.locked:
+                u._refuse(self, step_id, "revoked")      # revoking (or re-locking) a workflow stops runs already open on it, not only new ones
+                raise Trap("revoked")
             if self.pos >= len(self.steps):
                 u._refuse(self, step_id, "workflow_already_complete")
                 raise Trap("workflow_already_complete")
